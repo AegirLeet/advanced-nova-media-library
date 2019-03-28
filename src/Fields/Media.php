@@ -155,6 +155,7 @@ class Media extends Field
 
     private function fillCustomPropertiesFromRequest(NovaRequest $request, HasMedia $model, string $collection)
     {
+        return;
         $mediaItems = $model->getMedia($collection);
 
         collect($request->{$collection})->reject(function ($value) {
