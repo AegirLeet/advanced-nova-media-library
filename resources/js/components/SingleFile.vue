@@ -24,9 +24,6 @@
     props: ['image', 'removable', 'isCustomPropertiesEditable'],
     components: {
       GalleryItem,
-    },
-    computed() {
-      console.log(this.image);
     }
   };
 </script>
