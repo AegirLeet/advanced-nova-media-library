@@ -2,79 +2,97 @@
 
 namespace Ebess\AdvancedNovaMediaLibrary\Fields;
 
+use Illuminate\Contracts\Validation\Rule;
 use Illuminate\Support\Collection;
 use Laravel\Nova\Fields\Field;
 use Laravel\Nova\Http\Requests\NovaRequest;
 use Spatie\MediaLibrary\HasMedia\HasMedia;
+use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Illuminate\Support\Facades\Validator;
 
 class Media extends Field
 {
+    use HandlesCustomPropertiesTrait, HandlesConversionsTrait;
+
     public $component = 'advanced-media-library-field';
 
     protected $setFileNameCallback;
     protected $setNameCallback;
     protected $serializeMediaCallback;
-    protected $customPropertiesFields = [];
-    protected $customProperties = [];
     protected $responsive = false;
 
+    protected $collectionMediaRules = [];
     protected $singleMediaRules = [];
 
     protected $defaultValidatorRules = [];
 
     public $meta = ['type' => 'media'];
 
-    public function thumbnail(string $thumbnail): self
-    {
-        return $this->withMeta(compact('thumbnail'));
-    }
-
-    public function conversion(string $conversion): self
-    {
-        return $this->withMeta(compact('conversion'));
-    }
-
-    public function customPropertiesFields(array $customPropertiesFields): self
-    {
-        $this->customPropertiesFields = collect($customPropertiesFields);
-
-        return $this->withMeta(compact('customPropertiesFields'));
-    }
-    
-    public function customProperties(array $customProperties): self
-    {
-        $this->customProperties = $customProperties;
-
-        return $this;
-    }
-
-    public function serializeMediaUsing(callable $serializeMediaUsing): self
+	public function serializeMediaUsing(callable $serializeMediaUsing): self
     {
         $this->serializeMediaCallback = $serializeMediaUsing;
 
         return $this;
     }
 
-    public function conversionOnView(string $conversionOnView): self
-    {
-        return $this->withMeta(compact('conversionOnView'));
-    }
-
-    public function multiple(): self
-    {
-        return $this->withMeta(['multiple' => true]);
-    }
-
-    public function fullSize(): self
+	public function fullSize(): self
     {
         return $this->withMeta(['fullSize' => true]);
     }
 
-    public function singleMediaRules($singleMediaRules): self
+	public function rules($rules): self
+	{
+		$this->collectionMediaRules = ($rules instanceof Rule || is_string($rules)) ? func_get_args() : $rules;
+
+		return $this;
+	}
+
+    public function singleMediaRules($rules): self
     {
-        $this->singleMediaRules = $singleMediaRules;
+        $this->singleMediaRules = ($rules instanceof Rule || is_string($rules)) ? func_get_args() : $rules;
+
+        return $this;
+    }
+
+    /**
+     * Set the responsive mode, which enables the creation of responsive images on upload
+     *
+     * @param boolean $responsive
+     *
+     * @return $this
+     */
+    public function withResponsiveImages($responsive = true)
+    {
+        $this->responsive = $responsive;
+
+        return $this;
+    }
+
+    /**
+     * Set a filename callable callback
+     *
+     * @param callable $callback
+     *
+     * @return $this
+     */
+    public function setFileName($callback)
+    {
+        $this->setFileNameCallback = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Set a name callable callback
+     *
+     * @param callable $callback
+     *
+     * @return $this
+     */
+    public function setName($callback)
+    {
+        $this->setNameCallback = $callback;
 
         return $this;
     }
@@ -84,7 +102,8 @@ class Media extends Field
      */
     protected function fillAttributeFromRequest(NovaRequest $request, $requestAttribute, $model, $attribute)
     {
-        $data = request($requestAttribute, []);
+    	$attr = request('__media__', []);
+        $data = $attr[$requestAttribute] ?? [];
 
         collect($data)
             ->filter(function ($value) {
@@ -96,15 +115,15 @@ class Media extends Field
                 ])->validate();
             });
 
-        Validator::make($data, $this->rules)->validate();
+        Validator::make([$requestAttribute => $data], [$requestAttribute => $this->collectionMediaRules])
+			->validate();
 
-        $class = get_class($model);
-        $class::saved(function ($model) use ($request, $data, $attribute) {
+        return function () use ($request, $data, $attribute, $model) {
             $this->handleMedia($request, $model, $attribute, $data);
 
             // fill custom properties for existing media
             $this->fillCustomPropertiesFromRequest($request, $model, $attribute);
-        });
+        };
     }
 
     protected function handleMedia(NovaRequest $request, $model, $attribute, $data)
@@ -153,36 +172,6 @@ class Media extends Field
             });
     }
 
-    private function fillCustomPropertiesFromRequest(NovaRequest $request, HasMedia $model, string $collection)
-    {
-        return;
-        $mediaItems = $model->getMedia($collection);
-
-        collect($request->{$collection})->reject(function ($value) {
-            return $value instanceof UploadedFile;
-        })->each(function (int $id, int $index) use ($request, $mediaItems, $collection) {
-            if (!$media = $mediaItems->where('id', $id)->first()) {
-                return;
-            }
-
-            $this->fillMediaCustomPropertiesFromRequest($request, $media, $index, $collection);
-        });
-    }
-
-    private function fillMediaCustomPropertiesFromRequest(NovaRequest $request, $media, int $index, string $collection)
-    {
-        foreach ($this->customPropertiesFields as $field) {
-            $field->fillInto(
-                $request,
-                $media,
-                "custom_properties->{$field->attribute}",
-                "{$collection}-custom-properties.{$index}.{$field->attribute}"
-            );
-        }
-
-        $media->save();
-    }
-
     private function removeDeletedMedia($data, Collection $medias): Collection
     {
         $remainingIds = collect($data)->filter(function ($value) {
@@ -202,33 +191,35 @@ class Media extends Field
     }
 
     /**
-     * @param HasMedia $resource
+     * @param HasMedia|HasMediaTrait $resource
      * @param null $attribute
      */
     public function resolve($resource, $attribute = null)
     {
-        $this->value = $resource->getMedia($attribute ?? $this->attribute)
+		$collectionName = $attribute ?? $this->attribute;
+
+		$this->value = $resource->getMedia($collectionName)
             ->map(function (\Spatie\MediaLibrary\Models\Media $media) {
-                $conversion = $this->meta['conversion'] ?? null;
-                $urls = [
-                    'default' => $media->getFullUrl($this->meta['conversion'] ?? ''),
-                ];
-
-                if ($thumbnail = $this->meta['thumbnail'] ?? null) {
-                    $urls[$thumbnail] = $media->getFullUrl($thumbnail);
-                }
-
-                if ($conversionOnView = $this->meta['conversionOnView'] ?? null) {
-                    $urls[$conversionOnView] = $media->getFullUrl($conversionOnView);
-                }
-
-                return array_merge($this->serializeMedia($media), ['full_urls' => $urls]);
+                return array_merge($this->serializeMedia($media), ['__media_urls__' => $this->getConversionUrls($media)]);
             });
 
-        if ($data = $this->value->first()) {
-            $thumbnailUrl = $data['full_urls'][$this->meta['thumbnail'] ?? 'default'];
-            $this->withMeta(compact('thumbnailUrl'));
-        }
+		if ($collectionName) {
+			$this->checkCollectionIsMultiple($resource, $collectionName);
+		}
+    }
+
+	/**
+	 * @param HasMedia|HasMediaTrait $resource
+	 */
+	protected function checkCollectionIsMultiple(HasMedia $resource, string $collectionName)
+	{
+		$resource->registerMediaCollections();
+		$isSingle = collect($resource->mediaCollections)
+				->where('name', $collectionName)
+				->first()
+				->singleFile ?? false;
+
+		$this->withMeta(['multiple' => !$isSingle]);
     }
 
     public function serializeMedia(\Spatie\MediaLibrary\Models\Media $media): array
@@ -240,45 +231,38 @@ class Media extends Field
         return $media->toArray();
     }
 
-    /**
-     * Set the responsive mode, which enables the creation of responsive images on upload
-     *
-     * @param boolean $responsive
-     *
-     * @return $this
-     */
-    public function withResponsiveImages($responsive = true)
-    {
-        $this->responsive = $responsive;
+	/**
+	 * @deprecated not needed, field recognizes single/multi file media by itself
+	 */
+	public function multiple(): self
+	{
+		return $this;
+	}
 
-        return $this;
-    }
+	/**
+	 * @deprecated
+	 * @see conversionOnIndexView
+	 */
+	public function thumbnail(string $conversionOnIndexView): self
+	{
+		return $this->withMeta(compact('conversionOnIndexView'));
+	}
 
-    /**
-     * Set a filename callable callback
-     *
-     * @param callable $callback
-     *
-     * @return $this
-     */
-    public function setFileName($callback)
-    {
-        $this->setFileNameCallback = $callback;
+	/**
+	 * @deprecated
+	 * @see conversionOnPreview
+	 */
+	public function conversion(string $conversionOnPreview): self
+	{
+		return $this->withMeta(compact('conversionOnPreview'));
+	}
 
-        return $this;
-    }
-
-    /**
-     * Set a name callable callback
-     *
-     * @param callable $callback
-     *
-     * @return $this
-     */
-    public function setName($callback)
-    {
-        $this->setNameCallback = $callback;
-
-        return $this;
-    }
+	/**
+	 * @deprecated
+	 * @see conversionOnDetailView
+	 */
+	public function conversionOnView(string $conversionOnDetailView): self
+	{
+		return $this->withMeta(compact('conversionOnDetailView'));
+	}
 }

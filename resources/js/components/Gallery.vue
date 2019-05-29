@@ -1,28 +1,31 @@
 <template>
   <div class="gallery" :class="{editable}">
+    <cropper v-if="field.type === 'media' && editable" :image="cropImage" @close="cropImage = null" @crop-completed="onCroppedImage" :configs="field.croppingConfigs"/>
+
     <component :is="draggable ? 'draggable' : 'div'" v-if="images.length > 0" v-model="images"
                class="gallery-list clearfix">
-               
+
       <component :is="singleComponent" v-for="(image, index) in images" class="mb-3 p-3 mr-3"
-                    :key="index" :image="image" :field="field" :removable="editable" @remove="remove(index)"
-                    :is-custom-properties-editable="customPropertiesFields.length > 0"
-                    @editCustomProperties="customPropertiesImageIndex = index"
+                    :key="index" :image="image" :field="field" :editable="editable" :removable="editable" @remove="remove(index)"
+                    :is-custom-properties-editable="customProperties && customPropertiesFields.length > 0"
+                    @edit-custom-properties="customPropertiesImageIndex = index"
+                    @crop-start="cropImage = $event"
                     />
-                    
+
       <CustomProperties
         v-if="customPropertiesImageIndex !== null"
         v-model="images[customPropertiesImageIndex]"
         :fields="customPropertiesFields"
         @close="customPropertiesImageIndex = null"
       />
-      
+
     </component>
 
     <span v-else-if="!editable" class="mr-3">&mdash;</span>
 
     <span v-if="editable" class="form-file">
-      <input :id="field.name" :multiple="multiple" ref="file" class="form-file-input" type="file" @change="add"/>
-      <label :for="field.name" class="form-file-btn btn btn-default btn-primary" v-text="label"/>
+      <input :id="`__media__${field.attribute}`" :multiple="multiple" ref="file" class="form-file-input" type="file" @change="add"/>
+      <label :for="`__media__${field.attribute}`" class="form-file-btn btn btn-default btn-primary" v-text="label"/>
     </span>
 
     <p v-if="hasError" class="my-2 text-danger">
@@ -34,6 +37,7 @@
 <script>
   import SingleMedia from './SingleMedia';
   import SingleFile from './SingleFile';
+  import Cropper from './Cropper';
   import CustomProperties from './CustomProperties';
   import Draggable from 'vuedraggable';
 
@@ -43,6 +47,7 @@
       SingleMedia,
       SingleFile,
       CustomProperties,
+      Cropper,
     },
     props: {
       hasError: Boolean,
@@ -51,9 +56,14 @@
       value: Array,
       editable: Boolean,
       multiple: Boolean,
+      customProperties: {
+        type: Boolean,
+        default: false,
+      },
     },
     data() {
       return {
+        cropImage: null,
         images: this.value,
         customPropertiesImageIndex: null,
         singleComponent: this.field.type === 'media' ? SingleMedia : SingleFile,
@@ -89,6 +99,11 @@
         this.images = this.images.filter((value, i) => i !== index);
       },
 
+      onCroppedImage(image) {
+        let index = this.images.indexOf(this.cropImage);
+        this.images[index] = Object.assign(image, { custom_properties: this.cropImage.custom_properties });
+      },
+
       add() {
         Array.from(this.$refs.file.files).forEach(file => {
           file = new File([file], file.name, {type: file.type});
@@ -98,7 +113,8 @@
           reader.onload = () => {
             const fileData = {
               file: file,
-              full_urls: {
+              __media_urls__: {
+                __original__: reader.result,
                 default: reader.result,
               },
               name: file.name,
@@ -112,6 +128,9 @@
             }
           };
         });
+
+        // reset file input so if you upload the same image sequentially
+        this.$refs.file.value = null;
       },
     },
   };

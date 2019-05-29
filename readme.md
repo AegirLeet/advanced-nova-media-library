@@ -4,14 +4,23 @@ Manage images of [spatie's media library package](https://github.com/spatie/lara
 images and order them by drag and drop.
 
 ##### Table of Contents  
+* [Examples](#examples)  
 * [Install](#install)  
 * [Model media configuration](#model-media-configuration)  
 * [Generic file management](#generic-file-management)  
 * [Single image upload](#single-image-upload)  
 * [Multiple image upload](#multiple-image-upload)  
 * [Names of uploaded images](#names-of-uploaded-images)  
-* [Custom properties](#custom-properties)  
+* [Image cropping](#image-cropping)
+* [Custom properties](#custom-properties)
 * [Media Field (Video)](#media-field-video)  
+
+## Examples
+![Cropping](https://raw.githubusercontent.com/ebess/advanced-nova-media-library/master/docs/cropping.gif)
+![Single image upload](https://raw.githubusercontent.com/ebess/advanced-nova-media-library/master/docs/single-image.png)
+![Multiple image upload](https://raw.githubusercontent.com/ebess/advanced-nova-media-library/master/docs/multiple-images.png)
+![Custom properties](https://raw.githubusercontent.com/ebess/advanced-nova-media-library/master/docs/custom-properties.gif)
+![Generic file management](https://raw.githubusercontent.com/ebess/advanced-nova-media-library/master/docs/file-management.png)
 
 ## Install
 ```bash
@@ -48,7 +57,7 @@ In order to be able to upload and handle generic files just go ahead and use the
 use Ebess\AdvancedNovaMediaLibrary\Fields\Files;
 
 Files::make('Single file', 'one_file'),
-Files::make('Multiple files', 'multiple_files')->multiple(),
+Files::make('Multiple files', 'multiple_files'),
 ```
 
 ## Single image upload
@@ -62,7 +71,7 @@ public function fields(Request $request)
 {
     return [
         Images::make('Main image', 'main') // second parameter is the media collection name
-            ->thumbnail('thumb') // conversion used to display the image
+            ->conversionOnIndexView('thumb') // conversion used to display the image
             ->rules('required'), // validation rules
     ];
 }
@@ -81,10 +90,10 @@ public function fields(Request $request)
 {
     return [
         Images::make('Images', 'my_multi_collection') // second parameter is the media collection name
-            ->conversion('medium-size') // conversion used to display the "original" image
-            ->conversionOnView('thumb') // conversion used on the model's view
-            ->thumbnail('thumb') // conversion used to display the image on the model's index page
-            ->multiple() // enable upload of multiple images - also ordering
+            ->conversionOnPreview('medium-size') // conversion used to display the "original" image
+            ->conversionOnDetailView('thumb') // conversion used on the model's view
+            ->conversionOnIndexView('thumb') // conversion used to display the image on the model's index page
+            ->conversionOnForm('thumb') // conversion used to display the image on the model's form
             ->fullSize() // full size column
             ->rules('required', 'size:3') // validation rules for the collection of images
             // validation rules for the collection of images
@@ -130,6 +139,28 @@ Images::make('Image 1', 'img1')
 
 ```
 
+## Image cropping
+
+![Cropping](https://raw.githubusercontent.com/ebess/advanced-nova-media-library/master/docs/cropping.gif)
+
+By default you are able to crop / rotate images by clicking the scissors in the left bottom corner on the edit view. 
+The [vue-js-clipper](https://github.com/timtnleeProject/vuejs-clipper) is used for this purpose. The cropping feature is 
+limited to mime type of `image/jpg`, `image/jpeg` and `image/png`.
+
+**Important:** By cropping an existing image the original media model is deleted and replaced by the cropped image. 
+All custom properties are copied form the old to the new model.
+
+To disable this feature use the `croppable` method:
+```php
+Images::make('Gallery')->croppable(false);
+```
+
+You can set all configurations like ratio e.g. as following: 
+```php
+Images::make('Gallery')->croppingConfigs(['ratio' => 4/3]);
+```
+Available cropping configuration, see https://github.com/timtnleeProject/vuejs-clipper#clipper-basic.
+
 ## Custom properties
 
 ![Custom properties](https://raw.githubusercontent.com/ebess/advanced-nova-media-library/master/docs/custom-properties.gif)
@@ -141,14 +172,14 @@ Images::make('Gallery')
         Markdown::make('Description'),
     ]);
     
-Files::make('Multiple files', 'multiple_files')->multiple()
+Files::make('Multiple files', 'multiple_files')
     ->customPropertiesFields([
         Boolean::make('Active'),
         Markdown::make('Description'),
     ]);
     
 // custom properties without user input
-Files::make('Multiple files', 'multiple_files')->multiple()
+Files::make('Multiple files', 'multiple_files')
     ->customProperties([
         'foo' => auth()->user()->foo,
         'bar' => $api->getNeededData(),
@@ -167,7 +198,7 @@ class Category extends Resource
     public function fields(Request $request)
     {
         Media::make('Gallery') // media handles videos
-            ->thumbnail('thumb')
+            ->conversionOnIndexView('thumb')
             ->singleMediaRules('max:5000'); // max 5000kb
     }
 }
@@ -189,3 +220,7 @@ class YourModel extends Model implements HasMedia
 # Credits
 
 * [nova media library](https://github.com/jameslkingsley/nova-media-library)
+
+# Alternatives
+
+* [dmitrybubyakin/nova-medialibrary-field](https://github.com/dmitrybubyakin/nova-medialibrary-field)

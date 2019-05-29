@@ -1,9 +1,10 @@
 <template>
-  <component :is="field.fullSize ? 'full-width-field' : 'default-field'" :field="field">
+  <component :is="field.fullSize ? 'full-width-field' : 'default-field'" :field="field" full-width-content>
     <template slot="field">
       <div :class="{'px-8 pt-6': field.fullSize}">
-        <gallery slot="value" v-model="value" editable :field="field" :multiple="field.multiple"
-                 :has-error="hasError" :first-error="firstError" v-if="hasSetInitialValue"/>
+        <gallery slot="value" ref="gallery" v-if="hasSetInitialValue"
+                 v-model="value" editable custom-properties :field="field" :multiple="field.multiple"
+                 :has-error="hasError" :first-error="firstError"/>
       </div>
     </template>
   </component>
@@ -51,10 +52,14 @@
         this.value.forEach((file, index) => {
           const isNewImage = !file.id;
 
-          formData.append(`${field}[${index}]`, isNewImage ? file.file : file.id);
+          if (isNewImage) {
+            formData.append(`__media__[${field}][${index}]`, file.file, file.name);
+          } else {
+            formData.append(`__media__[${field}][${index}]`, file.id);
+          }
 
           objectToFormData({
-            [`${field}-custom-properties[${index}]`]: this.getImageCustomProperties(file)
+            [`__media-custom-properties__[${field}][${index}]`]: this.getImageCustomProperties(file)
           }, {}, formData);
         });
       },

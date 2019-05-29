@@ -1,14 +1,20 @@
 <template>
   <gallery-item class="gallery-item-image">
     <div class="gallery-item-info p-3">
-      <a v-if="removable" class="delete" href="#" @click.prevent="$emit('remove')">
+      <a v-if="downloadUrl" class="icon download" :href="downloadUrl" title="Download">
+        <icon type="download" view-box="0 0 20 22" width="16" height="16"/>
+      </a>
+      <a v-if="removable" class="icon delete" href="#" @click.prevent="$emit('remove')" title="Remove">
         <icon type="delete" view-box="0 0 20 20" width="16" height="16"/>
       </a>
-      <a v-if="isCustomPropertiesEditable" class="edit" href="#" @click.prevent="$emit('editCustomProperties')">
+      <a v-if="isCustomPropertiesEditable" class="icon edit" href="#" @click.prevent="$emit('edit-custom-properties')" title="Edit custom properties">
         <icon type="edit" view-box="0 0 20 20" width="16" height="16"/>
       </a>
-      <a class="preview" :href="image.full_urls.default" target="_blank">
+      <a class="preview" href="#" @click.prevent="showPreview">
         <icon type="search" view-box="0 0 20 20" width="30" height="30"/>
+      </a>
+      <a v-if="croppable" class="icon crop" href="#" @click.prevent="$emit('crop-start', image)">
+        <scissors-icon brand="var(--info)" view-box="0 0 20 20" width="16" height="16"/>
       </a>
     </div>
     <img :src="src" :alt="image.name" class="gallery-image">
@@ -16,17 +22,28 @@
 </template>
 
 <script>
+  import ScissorsIcon from './icons/Scissors';
   import GalleryItem from './GalleryItem';
 
   export default {
     components: {
+      ScissorsIcon,
       GalleryItem,
     },
-    props: ['image', 'field', 'removable', 'isCustomPropertiesEditable'],
-    data() {
-      return {
-        src: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
-      }
+    props: ['image', 'field', 'removable', 'editable', 'isCustomPropertiesEditable'],
+    data: () => ({
+      acceptedMimeTypes: ['image/jpg', 'image/jpeg', 'image/png'],
+      src: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
+    }),
+    computed: {
+      downloadUrl() {
+        return this.image.id ? `/nova-vendor/ebess/advanced-nova-media-library/download/${this.image.id}` : null;
+      },
+      croppable() {
+        return this.editable &&
+          this.field.croppable &&
+          this.acceptedMimeTypes.includes(this.image.mime_type || this.image.file.type);
+      },
     },
     watch: {
       image: {
@@ -35,31 +52,29 @@
       }
     },
     methods: {
+      showPreview() {
+        const blobUrl = this.image.file ? URL.createObjectURL(this.image.file) : this.image.__media_urls__.preview;
+        window.open(blobUrl, '_blank');
+      },
       getImage() {
-        // Return desired image conversion on view if it exists
-        let conversionOnView = this.field.conversionOnView;
-
-        if (this.image.id && conversionOnView && this.image.full_urls[conversionOnView]) {
-          this.src = this.image.full_urls[conversionOnView];
+        if (this.editable && this.image.__media_urls__.form) {
+          this.src = this.image.__media_urls__.form;
           return;
         }
 
-        // Return thumbnail if conversion exists
-        let thumbnail = this.field.thumbnail;
-
-        if (this.image.id && thumbnail && this.image.full_urls[thumbnail]) {
-          this.src = this.image.full_urls[thumbnail];
+        if (!this.editable && this.image.__media_urls__.detailView) {
+          this.src = this.image.__media_urls__.detailView;
           return;
         }
 
-        if (this.isVideo(this.image.full_urls.default)) {
+        if (this.isVideo(this.image.__media_urls__.__original__)) {
           //Seconds to seek to, to get thumbnail of video
           let seconds = 1;  //TODO get this from the field instead of hardcoding it here
-          this.getVideoThumbnail(this.image.full_urls.default, seconds);
+          this.getVideoThumbnail(this.image.__media_urls__.__original__, seconds);
           return;
         }
 
-        this.src = this.image.full_urls.default;
+        this.src = this.image.__media_urls__.__original__;
       },
       getVideoThumbnail(path, secs = 0) {
         const video = document.createElement('video');
@@ -122,10 +137,14 @@
         }
 
         .delete {
-          position: absolute;
           right: 10px;
-          top: 10px;
           color: var(--danger);
+        }
+
+        .crop {
+          left: 10px;
+          top: auto;
+          bottom: 10px;
         }
       }
 
@@ -137,11 +156,19 @@
       }
     }
 
-    .edit {
+    .icon {
+      cursor: pointer;
       position: absolute;
-      right: 30px;
       top: 10px;
       color: var(--info);
+    }
+
+    .edit {
+      right: 30px;
+    }
+
+    .download {
+      left: 10px;
     }
   }
 </style>
