@@ -45,7 +45,7 @@ trait HandlesCustomPropertiesTrait
             ->reject(function ($value) {
                 return $value instanceof UploadedFile || $value instanceof FileBag;
             })
-            ->each(function (int $id, int $index) use ($request, $mediaItems, $collection) {
+            ->each(function ($id, int $index) use ($request, $mediaItems, $collection) {
                 if (!$media = $mediaItems->where('id', $id)->first()) {
                     return;
                 }
@@ -64,10 +64,10 @@ trait HandlesCustomPropertiesTrait
 
         /** @var Field $field */
         foreach ($this->customPropertiesFields as $field) {
-			$targetAttribute = "custom_properties->{$field->attribute}";
-			$requestAttribute = "__media-custom-properties__.{$collection}.{$index}.{$field->attribute}";
+            $targetAttribute = "custom_properties->{$field->attribute}";
+            $requestAttribute = "__media-custom-properties__.{$collection}.{$index}.{$field->attribute}";
 
-			$field->fillInto($request, $media, $targetAttribute, $requestAttribute);
+            $field->fillInto($request, $media, $targetAttribute, $requestAttribute);
         }
 
         $media->save();

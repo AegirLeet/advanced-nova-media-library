@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Validator;
 
 class Media extends Field
 {
-    use HandlesCustomPropertiesTrait, HandlesConversionsTrait;
+    use HandlesCustomPropertiesTrait, HandlesConversionsTrait, HandlesExistingMediaTrait;
 
     public $component = 'advanced-media-library-field';
 
@@ -25,32 +25,41 @@ class Media extends Field
     protected $collectionMediaRules = [];
     protected $singleMediaRules = [];
 
+    protected $customHeaders = [];
+
     protected $defaultValidatorRules = [];
 
     public $meta = ['type' => 'media'];
 
-	public function serializeMediaUsing(callable $serializeMediaUsing): self
+    public function serializeMediaUsing(callable $serializeMediaUsing): self
     {
         $this->serializeMediaCallback = $serializeMediaUsing;
 
         return $this;
     }
 
-	public function fullSize(): self
+    public function fullSize(): self
     {
         return $this->withMeta(['fullSize' => true]);
     }
 
-	public function rules($rules): self
-	{
-		$this->collectionMediaRules = ($rules instanceof Rule || is_string($rules)) ? func_get_args() : $rules;
+    public function rules($rules): self
+    {
+        $this->collectionMediaRules = ($rules instanceof Rule || is_string($rules)) ? func_get_args() : $rules;
 
-		return $this;
-	}
+        return $this;
+    }
 
     public function singleMediaRules($rules): self
     {
         $this->singleMediaRules = ($rules instanceof Rule || is_string($rules)) ? func_get_args() : $rules;
+
+        return $this;
+    }
+
+    public function customHeaders(array $headers): self
+    {
+        $this->customHeaders = $headers;
 
         return $this;
     }
@@ -102,8 +111,12 @@ class Media extends Field
      */
     protected function fillAttributeFromRequest(NovaRequest $request, $requestAttribute, $model, $attribute)
     {
-    	$attr = request('__media__', []);
+        $attr = $request['__media__'] ?? [];
         $data = $attr[$requestAttribute] ?? [];
+
+        if ($attribute === 'ComputedField') {
+            $attribute = call_user_func($this->computedCallback, $model);
+        }
 
         collect($data)
             ->filter(function ($value) {
@@ -116,7 +129,7 @@ class Media extends Field
             });
 
         Validator::make([$requestAttribute => $data], [$requestAttribute => $this->collectionMediaRules])
-			->validate();
+            ->validate();
 
         return function () use ($request, $data, $attribute, $model) {
             $this->handleMedia($request, $model, $attribute, $data);
@@ -130,7 +143,8 @@ class Media extends Field
     {
         $remainingIds = $this->removeDeletedMedia($data, $model->getMedia($attribute));
         $newIds = $this->addNewMedia($request, $data, $model, $attribute);
-        $this->setOrder($remainingIds->union($newIds)->sortKeys()->all());
+        $existingIds = $this->addExistingMedia($request, $data, $model, $attribute, $model->getMedia($attribute));
+        $this->setOrder($remainingIds->union($newIds)->union($existingIds)->sortKeys()->all());
     }
 
     private function setOrder($ids)
@@ -149,6 +163,10 @@ class Media extends Field
 
                 if($this->responsive) {
                     $media->withResponsiveImages();
+                }
+
+                if(!empty($this->customHeaders)) {
+                    $media->addCustomHeaders($this->customHeaders);
                 }
 
                 if (is_callable($this->setFileNameCallback)) {
@@ -177,7 +195,7 @@ class Media extends Field
         $remainingIds = collect($data)->filter(function ($value) {
             return !$value instanceof UploadedFile;
         })->map(function ($value) {
-            return (int)$value;
+            return $value;
         });
 
         $medias->pluck('id')->diff($remainingIds)->each(function ($id) use ($medias) {
@@ -187,7 +205,7 @@ class Media extends Field
             }
         });
 
-        return $remainingIds;
+        return $remainingIds->intersect($medias->pluck('id'));
     }
 
     /**
@@ -196,30 +214,34 @@ class Media extends Field
      */
     public function resolve($resource, $attribute = null)
     {
-		$collectionName = $attribute ?? $this->attribute;
+        $collectionName = $attribute ?? $this->attribute;
+
+        if ($collectionName === 'ComputedField') {
+            $collectionName = call_user_func($this->computedCallback, $resource);
+        }
 
 		$this->value = $resource->getMedia($collectionName)
             ->map(function (\Spatie\MediaLibrary\Models\Media $media) {
                 return array_merge($this->serializeMedia($media), ['__media_urls__' => $this->getConversionUrls($media)]);
             });
 
-		if ($collectionName) {
-			$this->checkCollectionIsMultiple($resource, $collectionName);
-		}
+        if ($collectionName) {
+            $this->checkCollectionIsMultiple($resource, $collectionName);
+        }
     }
 
-	/**
-	 * @param HasMedia|HasMediaTrait $resource
-	 */
-	protected function checkCollectionIsMultiple(HasMedia $resource, string $collectionName)
-	{
-		$resource->registerMediaCollections();
-		$isSingle = collect($resource->mediaCollections)
-				->where('name', $collectionName)
-				->first()
-				->singleFile ?? false;
+    /**
+     * @param HasMedia|HasMediaTrait $resource
+     */
+    protected function checkCollectionIsMultiple(HasMedia $resource, string $collectionName)
+    {
+        $resource->registerMediaCollections();
+        $isSingle = collect($resource->mediaCollections)
+                ->where('name', $collectionName)
+                ->first()
+                ->singleFile ?? false;
 
-		$this->withMeta(['multiple' => !$isSingle]);
+        $this->withMeta(['multiple' => !$isSingle]);
     }
 
     public function serializeMedia(\Spatie\MediaLibrary\Models\Media $media): array
@@ -231,38 +253,38 @@ class Media extends Field
         return $media->toArray();
     }
 
-	/**
-	 * @deprecated not needed, field recognizes single/multi file media by itself
-	 */
-	public function multiple(): self
-	{
-		return $this;
-	}
+    /**
+     * @deprecated not needed, field recognizes single/multi file media by itself
+     */
+    public function multiple(): self
+    {
+        return $this;
+    }
 
-	/**
-	 * @deprecated
-	 * @see conversionOnIndexView
-	 */
-	public function thumbnail(string $conversionOnIndexView): self
-	{
-		return $this->withMeta(compact('conversionOnIndexView'));
-	}
+    /**
+     * @deprecated
+     * @see conversionOnIndexView
+     */
+    public function thumbnail(string $conversionOnIndexView): self
+    {
+        return $this->withMeta(compact('conversionOnIndexView'));
+    }
 
-	/**
-	 * @deprecated
-	 * @see conversionOnPreview
-	 */
-	public function conversion(string $conversionOnPreview): self
-	{
-		return $this->withMeta(compact('conversionOnPreview'));
-	}
+    /**
+     * @deprecated
+     * @see conversionOnPreview
+     */
+    public function conversion(string $conversionOnPreview): self
+    {
+        return $this->withMeta(compact('conversionOnPreview'));
+    }
 
-	/**
-	 * @deprecated
-	 * @see conversionOnDetailView
-	 */
-	public function conversionOnView(string $conversionOnDetailView): self
-	{
-		return $this->withMeta(compact('conversionOnDetailView'));
-	}
+    /**
+     * @deprecated
+     * @see conversionOnDetailView
+     */
+    public function conversionOnView(string $conversionOnDetailView): self
+    {
+        return $this->withMeta(compact('conversionOnDetailView'));
+    }
 }
